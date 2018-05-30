@@ -1,0 +1,118 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage[numbers]{natbib}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\begin{document}
+\title{EKF Estimation Project Writeup}
+\author{Suhasini P R}    
+
+\maketitle
+\section{The Tasks}
+\begin{enumerate}
+\item Sensor Noise
+\item Attitude Estimation
+\item Prediction Step
+\item Magnetometer Update
+\item Closed Loop + GPS Update
+\item Adding Your Controller
+\end{enumerate}
+\section{Rubric Points}
+Here I will consider the rubric points individually and describe how I addressed each point in my implementation.
+
+\subsection{Writeup}
+\begin{itemize}
+\item Provide a Writeup / README that includes all the rubric points and how you addressed each one. You can submit your writeup as markdown or pdf.
+
+
+You're reading it! Below I describe how I addressed each rubric point and where in my code each point is handled.
+\end{itemize}
+\subsection{Implement Estimator}
+\begin{itemize}
+\item Determine the standard deviation of the measurement noise of both GPS X data and Accelerometer X data.
+
+I just got the data from the Graph 1 and Graph 2 text files and calculated Standard deviation for all the values in excel.
+
+\item Implement a better rate gyro attitude integration scheme in the UpdateFromIMU() function.
+
+I used FromEuler$123\_$RPY to first convert the estimates to Quaternion and then used IntegrateBodyRate function to get the predicted Quaternion. I then got the pitch and yaw using Pitch() and Roll() functions in the Quaternion class
+
+\item Implement all of the elements of the prediction step for the estimator.
+
+My first step here was to complete the PredictState() function which was a simple integration after converting the acceleration from body frame to inertial frame
+
+I then completed the GetRbgprime function. Here i just populated the values by referring to the Estimation for Quadrotors document given. The matrix is as follows:
+\begin{align}
+R'_{bg} = \left[
+  \begin{array}{ccc}
+    -\cos \theta \sin \psi&
+    -\sin\phi \sin \theta \sin \psi - \cos \phi \cos \psi&
+    -cos \phi \sin \theta \sin \psi + \sin \phi \cos \psi\\
+    \cos \theta \cos \psi&
+    \sin \phi \sin \theta \cos \psi - \cos \phi \sin \psi&
+    \cos \phi \sin \theta \cos \psi + \sin \phi \sin \psi\\
+    0&0&0
+  \end{array}
+  \right]
+\end{align}
+
+After this, I implemented the Predict function to calculate $g'(x_t, u_t, \Delta t)$ matrix and then used this in the standard EKF update. 
+The math for $g'(x_t, u_t, \Delta t)$ matrix is taken from the Estimation For Quadrotors document as is as follows:
+\begin{align}
+  g'(x_t, u_t, \Delta t) &= 
+&= \left [ \begin{array}{ccccccc}
+      1 & 0 & 0 & \Delta t & 0 & 0 & 0\\
+      0 & 1 & 0 & 0 & \Delta t & 0 & 0\\
+      0 & 0 & 1 & 0 & 0 & \Delta t & 0\\
+      0 & 0 & 0 & 1 & 0 & 0 & R'_{bg}[0:]u_t[0:3] \Delta t\\
+      0 & 0 & 0 & 0 & 1  & 0 & R'_{bg}[1:]u_t[0:3] \Delta t\\
+      0 & 0 & 0 & 0 & 0 & 1 &  R'_{bg}[2:]u_t[0:3] \Delta t\\
+      0 & 0 & 0 & 0 & 0 & 0 & 1
+    \end{array}
+    \right]
+\end{align}
+
+I used the following equations to update the Covariance
+
+\begin{align}
+G_t = g'(u_t, x_t, \Delta t)
+\end{align}
+\begin{align}
+\bar{\Sigma}_t = G_t\Sigma_{t-1}G_t^T + Q_t
+\end{align}
+\item Implement the magnetometer update
+I assigned yaw component of ekfstate variable to zFromX and computed $h'(x_{t})$ as follows:
+\begin{align}
+  h'(x_t) = \left[\begin{array}{ccccccc}
+      0&0&0&0&0&0&1
+      \end{array}\right]
+\end{align}
+After this, the function calls the Update() function to perform update.
+
+\item Implement the GPS update.
+Similar to the previous rubric, I assigned teh pos and velocity components from ekfState to zFromX and computed $h'(x_{t})$ as follows:
+\begin{align}
+  h'(x_t) = \left[\begin{array}{ccccccc}
+      1&0&0&0&0&0&0\\
+      0&1&0&0&0&0&0\\
+      0&0&1&0&0&0&0\\
+      0&0&0&1&0&0&0\\
+      0&0&0&0&1&0&0\\
+      0&0&0&0&0&1&0\\                  
+      \end{array}\right]
+\end{align}
+\end{itemize}
+\subsection{Flight Evaluation}
+\begin{itemize}
+\item Meet the performance criteria of each step.
+
+Its meeting!
+\item De-tune your controller to successfully fly the final desired box trajectory with your estimator and realistic sensors.
+
+Its meeting!. Although, the square is not perfect.
+\end{itemize}
+\end{document}

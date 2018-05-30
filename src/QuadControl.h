@@ -4,11 +4,13 @@
 #include "Utility/StringUtils.h"
 #include "Trajectory.h"
 #include "BaseController.h"
+#include <iostream>
+#include <fstream>
 
 class QuadControl : public BaseController
 {
 public:
-  QuadControl(string name, string config) : BaseController(name,config) { Init(); };
+  QuadControl(string config) : BaseController(config) { Init(); };
 
   virtual void Init();
 
@@ -48,4 +50,11 @@ public:
 
   // integral control
   float integratedAltitudeError;
+
+  float prevYawError;
+
+  //Logging
+  string logFileName;
+  ofstream LogStream;
+  string intro;
 };

@@ -1,12 +1,27 @@
 #include "Common.h"
 #include "QuadControl.h"
-
+#include <iostream>
+#include <fstream>
 #include "Utility/SimpleConfig.h"
 
 #include "Utility/StringUtils.h"
 #include "Trajectory.h"
 #include "BaseController.h"
 #include "Math/Mat3x3F.h"
+
+#define MOTOR_COMMANDS_LOGGING 0
+#define BodyRateControl_LOGGING 0
+#define RollPitchControl_LOGGING 0
+#define AltitudeControl_LOGGING 0
+#define LateralPositionControl_LOGGING 0
+#define YawControl_LOGGING 0
+
+#define SCENARIO_1 0
+#define SCENARIO_2_1 1
+#define SCENARIO_2_2 1
+#define SCENARIO_3_1 1
+#define SCENARIO_3_2 1
+#define SCENARIO_4 0
 
 #ifdef __PX4_NUTTX
 #include <systemlib/param/param.h>
@@ -18,6 +33,16 @@ void QuadControl::Init()
 
   // variables needed for integral control
   integratedAltitudeError = 0;
+  prevYawError = 0;
+
+  //Logging
+#if (MOTOR_COMMANDS_LOGGING == 1 || BodyRateControl_LOGGING == 1 || RollPitchControl_LOGGING ==1 || AltitudeControl_LOGGING == 1 || LateralPositionControl_LOGGING == 1 || YawControl_LOGGING == 1)
+  logFileName = "Logs\\Log_6.txt";
+  intro = "-----------------SCENARIO_3-------------\n --------------------------------\n";
+  LogStream.open(logFileName, ios::out | ios::app);
+  LogStream << intro;
+  LogStream.close();
+#endif
     
 #ifndef __PX4_NUTTX
   // Load params from simulator parameter system
@@ -45,6 +70,10 @@ void QuadControl::Init()
 
   minMotorThrust = config->Get(_config + ".minMotorThrust", 0);
   maxMotorThrust = config->Get(_config + ".maxMotorThrust", 100);
+
+  
+
+  
 #else
   // load params from PX4 parameter system
   //TODO
@@ -70,31 +99,47 @@ VehicleCommand QuadControl::GenerateMotorCommands(float collThrustCmd, V3F momen
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
-  cmd.desiredThrustsN[0] = mass * 9.81f / 4.f; // front left
-  cmd.desiredThrustsN[1] = mass * 9.81f / 4.f; // front right
-  cmd.desiredThrustsN[2] = mass * 9.81f / 4.f; // rear left
-  cmd.desiredThrustsN[3] = mass * 9.81f / 4.f; // rear right
 
+/**Logging**/
+#if MOTOR_COMMANDS_LOGGING == 1
+
+	LogStream.open(logFileName, ios::out | ios::app);
+	LogStream << "Generate Motor Commands:\n";
+	LogStream << "Inputs: collThurstCmd " << collThrustCmd;
+	LogStream << ", momentCMd " << momentCmd.x << "," << momentCmd.y <<"," << momentCmd.z << " \n";
+
+#endif
+
+	float l = L / sqrt(2);
+	float mom_x = momentCmd.x / L;
+	float mom_y = momentCmd.y / L;
+	float mom_z = momentCmd.z / kappa;
+	float F1, F2, F3, F4;
+#if SCENARIO_1 == 1
+	F1 = mass * 9.81f / 4.f; // front left
+	F2 = mass * 9.81f / 4.f; // front right
+	F3 = mass * 9.81f / 4.f; // rear left
+	F4 = mass * 9.81f / 4.f; // rear right
+#elif SCENARIO_2_1 == 1
+	F1 = (collThrustCmd + mom_x + mom_y - mom_z) / 4.0f; //front left
+	F2 = (collThrustCmd - mom_x + mom_y + mom_z) / 4.0f;// front right
+	F3 = (collThrustCmd + mom_x - mom_y + mom_z) / 4.0f;// rear left
+	F4 = (collThrustCmd - mom_x - mom_y - mom_z) / 4.0f;// rear right
+#endif
+	cmd.desiredThrustsN[0] = F1;
+	cmd.desiredThrustsN[1] = F2;
+	cmd.desiredThrustsN[2] = F3;
+	cmd.desiredThrustsN[3] = F4;
+
+#if (MOTOR_COMMANDS_LOGGING ==1)
+
+	//Logging
+	LogStream << "Outputa: F1: " << F1 << ", F2: " << F2 << ", F3: " << F3 << ", F4: " << F4 << "\n";
+	LogStream << " ---------------------\n";
+	LogStream.close();
+
+#endif
   /////////////////////////////// END STUDENT CODE ////////////////////////////
-  
-  /////////////////////////////// BEGIN SOLUTION //////////////////////////////
-  // Convert desired moment into differential thrusts
-  V3F diffThrust;
-
-  // for X shaped quad
-  diffThrust.x = momentCmd.x / L / 2.f / sqrtf(2);
-  diffThrust.y = momentCmd.y / L / 2.f / sqrtf(2);
-  diffThrust.z = momentCmd.z / 4.f / kappa;
-
-  // MIXING
-  // combine the collective thrust with the differential thrust commands to find desired motor thrusts
-  // X Shaped Quad (NED Frame)
-  cmd.desiredThrustsN[0] = collThrustCmd / 4.f - diffThrust.z + diffThrust.y + diffThrust.x; // front left
-  cmd.desiredThrustsN[1] = collThrustCmd / 4.f + diffThrust.z + diffThrust.y - diffThrust.x; // front right
-  cmd.desiredThrustsN[2] = collThrustCmd / 4.f + diffThrust.z - diffThrust.y + diffThrust.x; // rear left
-  cmd.desiredThrustsN[3] = collThrustCmd / 4.f - diffThrust.z - diffThrust.y - diffThrust.x; // rear right
-  
-  //////////////////////////////// END SOLUTION ///////////////////////////////
 
   return cmd;
 }
@@ -116,18 +161,33 @@ V3F QuadControl::BodyRateControl(V3F pqrCmd, V3F pqr)
   V3F momentCmd;
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
-
-  
-
+#if BodyRateControl_LOGGING == 1
+  LogStream.open(logFileName, ios::out | ios::app);
+  LogStream << "Body Rate Control:\n";
+  LogStream << "Inputs: \n";
+  LogStream << "pqrCmd: " << pqrCmd.x << " , " << pqrCmd.y << " , " << pqrCmd.z << "\n";
+  LogStream << "pqr: " << pqr.x << " , " << pqr.y << " , " << pqr.z << "\n";
+  LogStream << "KpPQR: " << kpPQR.x << " , " << kpPQR.y << " , " << kpPQR.z << "\n";
+#endif
+  V3F MOI(Ixx, Iyy, Izz);
+  momentCmd = kpPQR * (pqrCmd - pqr) * MOI;
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
-  /////////////////////////////// BEGIN SOLUTION //////////////////////////////
-  V3F rate_error = pqrCmd - pqr;
-  V3F omega_dot_des = rate_error * kpPQR;
-  momentCmd = omega_dot_des * V3F(Ixx, Iyy, Izz);
-  //////////////////////////////// END SOLUTION ///////////////////////////////
+#if BodyRateControl_LOGGING == 1
+  LogStream << "Outputs: \n";
+  LogStream << "momentCmd: " << momentCmd.x << " , " << momentCmd.y << " , " << momentCmd.z << "\n";
+  LogStream << "---------\n";
+  LogStream.close();
+#endif
 
+#if SCENARIO_2_1 == 1
   return momentCmd;
+#else
+  momentCmd.x = 0;
+  momentCmd.y = 0;
+  momentCmd.z = 0;
+  return momentCmd;
+#endif
 }
 
 // returns a desired roll and pitch rate 
@@ -153,27 +213,50 @@ V3F QuadControl::RollPitchControl(V3F accelCmd, Quaternion<float> attitude, floa
   Mat3x3F R = attitude.RotationMatrix_IwrtB();
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
+#if RollPitchControl_LOGGING == 1
+  LogStream.open(logFileName, ios::out | ios::app);
+  LogStream << "RollPitchControl:\n";
+  LogStream << "Inputs: \n";
+  LogStream << "accelCmd: " << accelCmd.x << " , " << accelCmd.y << " , " << accelCmd.z << "\n";
+  LogStream << "CollThrust: " << collThrustCmd << "\n";
+  LogStream << "kpBank: " << kpBank << "\n";
+#endif
 
-
+	float target_r13 = accelCmd.x * mass / collThrustCmd;
+	LogStream << "Temp variables: ";
+	LogStream << "Target r_13 before bounding: " << target_r13 << ", ";
+	target_r13 = -CONSTRAIN(target_r13, -maxTiltAngle, maxTiltAngle);
+	LogStream << "Target r_13 after bounding: " << target_r13 << ", ";
+	float target_r23 = accelCmd.y * mass / collThrustCmd;
+	LogStream << "Target r_23 before bounding: " << target_r23 << ", ";
+	target_r23 = -CONSTRAIN(target_r23, -maxTiltAngle, maxTiltAngle);
+	  
+	LogStream << "Target r_23 after bounding: " << target_r23 << "\n";
+	float a = kpBank * (target_r13 - R(0, 2));
+	float b = kpBank * (target_r23 - R(1, 2));
+	pqrCmd.x = ((R(1, 0) * a) - (R(1, 1) * b)) / R(2, 2);
+	pqrCmd.y = ((R(0, 0) * a) - (R(0, 1) * b)) / R(2, 2);
+	pqrCmd.z = 0;
+  
+ 
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
+#if RollPitchControl_LOGGING == 1
+  LogStream << "Outputs: \n";
+  LogStream << "pqrCMd: " << pqrCmd.x << " , " << pqrCmd.y << " , " << pqrCmd.z << "\n";
+  LogStream << "---------\n";
+  LogStream.close();
+#endif
 
-  /////////////////////////////// BEGIN SOLUTION //////////////////////////////
-
-  
-  float target_R13 = -CONSTRAIN(accelCmd[0] / (collThrustCmd / mass), -maxTiltAngle, maxTiltAngle);
-  float target_R23 = -CONSTRAIN(accelCmd[1] / (collThrustCmd / mass), -maxTiltAngle, maxTiltAngle);
-    
-  if (collThrustCmd < 0)
-  {
-    target_R13 = 0;
-    target_R23 = 0;
-  }
-  pqrCmd.x = (1 / R(2, 2))*(-R(1, 0) * kpBank*(R(0, 2) - target_R13) + R(0, 0) * kpBank*(R(1, 2) - target_R23));
-  pqrCmd.y = (1 / R(2, 2))*(-R(1, 1) * kpBank*(R(0, 2) - target_R13) + R(0, 1) * kpBank*(R(1, 2) - target_R23));
-
-  //////////////////////////////// END SOLUTION ///////////////////////////////
+#if SCENARIO_2_2 ==1
   return pqrCmd;
+#else
+  pqrCmd.x = 0;
+  pqrCmd.y = 0;
+  pqrCmd.z = 0;
+  return pqrCmd;
+#endif
+  
 }
 
 float QuadControl::AltitudeControl(float posZCmd, float velZCmd, float posZ, float velZ, Quaternion<float> attitude, float accelZCmd, float dt)
@@ -201,29 +284,53 @@ float QuadControl::AltitudeControl(float posZCmd, float velZCmd, float posZ, flo
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
-
-
-  /////////////////////////////// END STUDENT CODE ////////////////////////////
-
-  /////////////////////////////// BEGIN SOLUTION //////////////////////////////
-
-  velZCmd += kpPosZ * (posZCmd - posZ);
+#if AltitudeControl_LOGGING == 1
+  LogStream.open(logFileName, ios::out | ios::app);
+  LogStream << "AltitudeControl:\n";
+  LogStream << "Inputs: \n";
+  LogStream << "posZCmd: " << posZCmd << "\n";
+  LogStream << "velZCmd: " << velZCmd << "\n";
+  LogStream << "posZ: " << posZ << "\n";
+  LogStream << "velZ: " << velZ << "\n";
+  LogStream << "accelZCmd: " << accelZCmd << "\n";
+  LogStream << "dt: " << dt << "\n";
+  LogStream << "KpPosZ: " << kpPosZ << "\n";
+  LogStream << "KpVelZ: " << kpVelZ << "\n";
+  LogStream << "KiPosZ: " << KiPosZ << "\n";
+#endif
 
   integratedAltitudeError += (posZCmd - posZ) * dt;
+  velZCmd = velZCmd > maxAscentRate ? maxAscentRate : velZCmd;
+  velZCmd = velZCmd < -maxDescentRate ? -maxDescentRate : velZCmd;
+#if AltitudeControl_LOGGING == 1
+  LogStream << "Velocity after bounding: " << velZCmd << "\n" ;
+  LogStream << "integrated error: " << integratedAltitudeError << "\n";
+#endif
+  float u_bar = kpPosZ * (posZCmd - posZ) + kpVelZ * (velZCmd - velZ) + accelZCmd + KiPosZ * integratedAltitudeError;
 
-  velZCmd = CONSTRAIN(velZCmd, -maxAscentRate, maxDescentRate);
+  thrust = (CONST_GRAVITY-u_bar) * mass / R(2,2) ;
+#if AltitudeControl_LOGGING == 1 
 
-  float desAccel = kpVelZ * (velZCmd - velZ) + KiPosZ * integratedAltitudeError + accelZCmd - 9.81f;
+  LogStream << "Thrust before bounding: " << thrust <<"\n";
 
-  thrust = -(desAccel / R(2, 2) * mass);
-
-  //////////////////////////////// END SOLUTION ///////////////////////////////
-  
+#endif
+#if SCENARIO_3_1 == 1
+  //thrust = thrust > maxMotorThrust? maxMotorThrust : thrust;
+#else
+  thrust = mass * 9.81; //temporary
+#endif
+  /////////////////////////////// END STUDENT CODE ////////////////////////////
+#if AltitudeControl_LOGGING == 1
+  LogStream << "Outputs: \n";
+  LogStream << "thrust: " << thrust << "\n";
+  LogStream << "---------\n";
+  LogStream.close();
+#endif
   return thrust;
 }
 
 // returns a desired acceleration in global frame
-V3F QuadControl::LateralPositionControl(V3F posCmd, V3F velCmd, V3F pos, V3F vel, V3F accelCmdFF)
+V3F QuadControl::LateralPositionControl(V3F posCmd, V3F velCmd, V3F pos, V3F vel, V3F accelCmd)
 {
   // Calculate a desired horizontal acceleration based on 
   //  desired lateral position/velocity/acceleration and current pose
@@ -232,48 +339,62 @@ V3F QuadControl::LateralPositionControl(V3F posCmd, V3F velCmd, V3F pos, V3F vel
   //   velCmd: desired velocity, in NED [m/s]
   //   pos: current position, NED [m]
   //   vel: current velocity, NED [m/s]
-  //   accelCmdFF: feed-forward acceleration, NED [m/s2]
+  //   accelCmd: desired acceleration, NED [m/s2]
   // OUTPUT:
   //   return a V3F with desired horizontal accelerations. 
   //     the Z component should be 0
   // HINTS: 
   //  - use the gain parameters kpPosXY and kpVelXY
-  //  - make sure you limit the maximum horizontal velocity and acceleration
+  //  - make sure you cap the horizontal velocity and acceleration
   //    to maxSpeedXY and maxAccelXY
 
   // make sure we don't have any incoming z-component
-  accelCmdFF.z = 0;
+  accelCmd.z = 0;
   velCmd.z = 0;
   posCmd.z = pos.z;
-
-  // we initialize the returned desired acceleration to the feed-forward value.
-  // Make sure to _add_, not simply replace, the result of your controller
-  // to this variable
-  V3F accelCmd = accelCmdFF;
-
+  V3F horizAccel;
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
+#if LateralPositionControl_LOGGING == 1
+  LogStream.open(logFileName, ios::out | ios::app);
+  LogStream << "Lateral Position Control:\n";
+  LogStream << "Inputs: \n";
+  LogStream << "posCmd: " << posCmd.x << ","<< posCmd.y << ", " << posCmd.z << "\n";
+  LogStream << "velCmd: " << velCmd.x << "," << velCmd.y << ", " << velCmd.z << "\n";
+  LogStream << "pos: " << pos.x << "," << pos.y << ", " << pos.z << "\n";
+  LogStream << "vel: " << vel.x << "," << vel.y << ", " << vel.z << "\n";
+  LogStream << "accelCmd: " << accelCmd.x << "," << accelCmd.y << ", " << accelCmd.z << "\n";
+  LogStream << "kpPosXY: " << kpPosXY << "\n";
+  LogStream << "kpVelXY: " << kpVelXY << "\n";
+#endif
 
-  
+  velCmd.x = velCmd.x > maxSpeedXY ? maxSpeedXY : velCmd.x;
+  velCmd.y = velCmd.y > maxSpeedXY ? maxSpeedXY : velCmd.y;
 
+#if LateralPositionControl_LOGGING == 1
+  LogStream << "Velocity after bounding: " << velCmd.x << "," << velCmd.y << ", " << velCmd.z << "\n";
+#endif
+  horizAccel = kpPosXY * (posCmd - pos) + kpVelXY * (velCmd - vel) + accelCmd;
+
+#if LateralPositionControl_LOGGING == 1
+  LogStream << "horizontal acceleration before bounding: " << horizAccel.x << "," << horizAccel.y << ", " << horizAccel.z << "\n";
+#endif
+  accelCmd.x = horizAccel.x > maxAccelXY ? maxAccelXY : horizAccel.x;
+  accelCmd.y = horizAccel.y > maxAccelXY ? maxAccelXY : horizAccel.y;
+
+#if SCENARIO_3_1 == 1
+  accelCmd.x = accelCmd.x;
+  accelCmd.y = accelCmd.y;
+#else
+  accelCmd.x = 0;
+  accelCmd.y = 0;
+#endif
   /////////////////////////////// END STUDENT CODE ////////////////////////////
-
-  /////////////////////////////// BEGIN SOLUTION //////////////////////////////
-
-  velCmd += kpPosXY * (posCmd - pos);
-
-  if (velCmd.mag() > maxSpeedXY)
-  {
-    velCmd = velCmd * maxSpeedXY / velCmd.mag();
-  }
-
-  accelCmd += kpVelXY * (velCmd - vel);
-  if (accelCmd.mag() > maxAccelXY)
-  {
-    accelCmd = accelCmd * maxAccelXY / accelCmd.mag();
-  }
-
-  //////////////////////////////// END SOLUTION ///////////////////////////////
-
+#if LateralPositionControl_LOGGING == 1
+  LogStream << "Outputs: \n";
+  LogStream << "accelCmd: " << accelCmd.x << "," << accelCmd.y << ", " << accelCmd.z << "\n";
+  LogStream << "---------\n";
+  LogStream.close();
+#endif
   return accelCmd;
 }
 
@@ -291,28 +412,53 @@ float QuadControl::YawControl(float yawCmd, float yaw)
   //  - use the yaw control gain parameter kpYaw
 
   float yawRateCmd=0;
+
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
-
-
-  /////////////////////////////// END STUDENT CODE ////////////////////////////
-
-  /////////////////////////////// BEGIN SOLUTION //////////////////////////////
-
-  float yawError = yawCmd - yaw;
-  yawError = fmodf(yawError, F_PI*2.f);
-  if (yawError > F_PI)
-  {
-    yawError -= 2.f * F_PI;
-  }
-  else if (yawError < -F_PI)
-  {
-    yawError += 2.f * F_PI;
-  }
-  yawRateCmd = yawError * kpYaw;
-
-  //////////////////////////////// END SOLUTION ///////////////////////////////
+#if YawControl_LOGGING == 1
+  LogStream.open(logFileName, ios::out | ios::app);
+  LogStream << "YawControl:\n";
+  LogStream << "Inputs: \n";
+  LogStream << "yawCmd: " << yawCmd << "\n";
+  LogStream << "yaw: " << yaw << "\n";
+  LogStream << "kpYaw: " << kpYaw << "\n";
   
+#endif
+
+ // yawCmd = fmodf(yawCmd,2*3.14);
+  float yaw_error = (yawCmd - yaw);
+//  float yaw_error = (yawCmd - yaw);
+#if YawControl_LOGGING == 1
+  
+  LogStream << "yawCmd after bounding: " << yawCmd << "\n";
+  LogStream << "yawerror: " << yaw_error << "\n";
+  LogStream << "prevYawError: " << prevYawError << "\n";
+
+#endif
+  if (yaw_error > 3.14)
+  yaw_error = yaw_error - 2.0 * 3.14;
+  else if (yaw_error < -3.14)
+  yaw_error = yaw_error + 2.0 * 3.14;
+
+#if YawControl_LOGGING == 1
+  LogStream << "yawerror after bounding: " << yaw_error << "\n";
+ #endif
+
+  yawRateCmd = kpYaw * yaw_error;
+  prevYawError = yaw_error;
+  /////////////////////////////// END STUDENT CODE ////////////////////////////
+#if YawControl_LOGGING == 1
+  LogStream << "Outputs: \n";
+  LogStream << "yawRateCmd: " <<  yawRateCmd << "\n";
+  LogStream << "---------";
+  LogStream.close();
+#endif
+
+#if SCENARIO_3_2 == 1
   return yawRateCmd;
+#else
+  return 0;
+#endif
+
 }
 
 VehicleCommand QuadControl::RunControl(float dt, float simTime)
