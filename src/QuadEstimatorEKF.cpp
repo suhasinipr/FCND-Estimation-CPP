@@ -6,7 +6,7 @@
 
 using namespace SLR;
 
-//const int QuadEstimatorEKF::QUAD_EKF_NUM_STATES;
+const int QuadEstimatorEKF::QUAD_EKF_NUM_STATES;
 
 QuadEstimatorEKF::QuadEstimatorEKF(string config, string name)
   : BaseQuadEstimator(config),
