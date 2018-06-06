@@ -307,12 +307,12 @@ void QuadEstimatorEKF::UpdateFromGPS(V3F pos, V3F vel)
   //  - The GPS measurement covariance is available in member variable R_GPS
   //  - this is a very simple update
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
-  zFromX(0) = ekfState(0);
-  zFromX(1) = ekfState(1);
-  zFromX(2) = ekfState(2);
-  zFromX(3) = ekfState(3);
-  zFromX(4) = ekfState(4);
-  zFromX(5) = ekfState(5);
+
+
+  for (int i = 0; i < 6; i++)
+  {
+	  zFromX(i) = ekfState(i);
+  }
  
   for (int i = 0; i < 6; i++)
   {
@@ -340,12 +340,22 @@ void QuadEstimatorEKF::UpdateFromMag(float magYaw)
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
   zFromX(0) = ekfState(6);
 
+  //just normalizing the angles z and zFromX didnt work very well. I was getting fluctuations in the yaw when it changes from pi to -pi. 
+  //So added one more function called UpdateMag which normalizes the yaw error before using in the ekf update equation.
+  if (z(0) > F_PI)  z(0) -= 2.f*F_PI;
+  if (z(0) < -F_PI) z(0) += 2.f*F_PI;
+
   if (zFromX(0) > F_PI)  zFromX(0) -= 2.f*F_PI;
-  if (zFromX(0) < -F_PI)  zFromX(0) += 2.f*F_PI;
+  if (zFromX(0) < -F_PI) zFromX(0) += 2.f*F_PI;
+
+
   hPrime(QUAD_EKF_NUM_STATES - 1) = 1;
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
-  Update(z, hPrime, R_Mag, zFromX);
+  //So added one more function called UpdateMag which normalizes the yaw error before using in the ekf update equation
+
+  //Update(z, hPrime, R_Mag, zFromX);
+  UpdateMag(z, hPrime, R_Mag, zFromX);
 }
 
 // Execute an EKF update step
@@ -371,6 +381,39 @@ void QuadEstimatorEKF::Update(VectorXf& z, MatrixXf& H, MatrixXf& R, VectorXf& z
   eye.setIdentity();
 
   ekfCov = (eye - K*H)*ekfCov;
+}
+
+// Execute an EKF update step for magnetometer update only 
+// This was added because I wanted to normalize the error
+// z: measurement
+// H: Jacobian of observation function evaluated at the current estimated state
+// R: observation error model covariance 
+// zFromX: measurement prediction based on current state
+void QuadEstimatorEKF::UpdateMag(VectorXf& z, MatrixXf& H, MatrixXf& R, VectorXf& zFromX)
+{
+	assert(z.size() == H.rows());
+	assert(QUAD_EKF_NUM_STATES == H.cols());
+	assert(z.size() == R.rows());
+	assert(z.size() == R.cols());
+	assert(z.size() == zFromX.size());
+	VectorXf yawError(z.size());
+	MatrixXf toInvert(z.size(), z.size());
+	toInvert = H*ekfCov*H.transpose() + R;
+	MatrixXf K = ekfCov * H.transpose() * toInvert.inverse();
+	//normalizing yawError
+	yawError(0) = z(0) - zFromX(0);
+
+	//yawError(0) = fmodf(2 * F_PI, yawError(0)) - 2*F_PI;
+	if (yawError(0) > F_PI)  yawError(0) -= 2.f*F_PI;
+	if (yawError(0) < -F_PI) yawError(0) += 2.f*F_PI;
+
+	//ekfState = ekfState + K*(z - zFromX);
+	ekfState = ekfState + K*(yawError);
+
+	MatrixXf eye(QUAD_EKF_NUM_STATES, QUAD_EKF_NUM_STATES);
+	eye.setIdentity();
+
+	ekfCov = (eye - K*H)*ekfCov;
 }
 
 // Calculate the condition number of the EKF ovariance matrix (useful for numerical diagnostics)

@@ -56,6 +56,13 @@ public:
   // zFromX: measurement prediction based on current state
   void Update(VectorXf& z, MatrixXf& H, MatrixXf& R, VectorXf& zFromX);
 
+  // Mag EKF update
+  // z: measurement
+  // H: Jacobian of observation function evaluated at the current estimated state
+  // R: observation error model covariance 
+  // zFromX: measurement prediction based on current state
+  void UpdateMag(VectorXf& z, MatrixXf& H, MatrixXf& R, VectorXf& zFromX);
+
   // EKF state and covariance
 	VectorXf ekfState;
 	MatrixXf ekfCov;
